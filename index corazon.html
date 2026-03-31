@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Luz</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,300&family=Raleway:wght@100;200&display=swap" rel="stylesheet">
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html,body { width:100%; height:100%; background:#000; overflow:hidden; touch-action:none; cursor:none; }
+canvas { display:block; position:absolute; top:0; left:0; }
+
+#start {
+  position:fixed; inset:0; z-index:100;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  background:#000;
+  transition: opacity 1.4s ease;
+}
+#start.hide { opacity:0; pointer-events:none; }
+#startBtn {
+  font-family:'Raleway',sans-serif; font-weight:200;
+  font-size:clamp(10px,2.8vw,15px);
+  letter-spacing:0.45em; text-transform:uppercase;
+  color:#b87090; border:1px solid #b87090;
+  padding:14px 40px; background:transparent; cursor:pointer;
+  transition:all .35s;
+}
+#startBtn:hover { background:rgba(160,70,110,.18); color:#e0a0c0; border-color:#e0a0c0; }
+#startHint {
+  font-family:'Raleway',sans-serif; font-weight:200;
+  font-size:clamp(8px,1.8vw,11px);
+  letter-spacing:0.32em; color:#503050; margin-top:16px; text-transform:uppercase;
+}
+</style>
+</head>
+<body>
+
+<div id="start">
+  <button id="startBtn">abrir</button>
+  <div id="startHint">toca para comenzar</div>
+</div>
+
+<canvas id="c"></canvas>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIG
+// ─────────────────────────────────────────────────────────────────────────────
+var MUSIC_FILE  = 'music.mp3';          // same folder in GitHub repo
+var isMob       = /android|iphone|ipad|ipod/i.test(navigator.userAgent);
+var koef        = isMob ? 0.5 : 1;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CANVAS
+// ─────────────────────────────────────────────────────────────────────────────
+var canvas = document.getElementById('c');
+var ctx    = canvas.getContext('2d');
+var W, H;
+
+function resize() {
+  W = canvas.width  = Math.round(innerWidth  * koef);
+  H = canvas.height = Math.round(innerHeight * koef);
+  canvas.style.width  = innerWidth  + 'px';
+  canvas.style.height = innerHeight + 'px';
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0,0,W,H);
+  buildOrigins();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HEART MATH
+// ─────────────────────────────────────────────────────────────────────────────
+function heartPos(t) {
+  return [Math.pow(Math.sin(t),3),
+    -(15*Math.cos(t)-5*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t))];
+}
+var origins=[], N=0, targets=[];
+function buildOrigins() {
+  origins=[];
+  var dr=isMob?0.3:0.1;
+  [[210,13],[150,9],[90,5]].forEach(function(s){
+    for(var t=0;t<Math.PI*2;t+=dr){
+      var p=heartPos(t); origins.push([p[0]*s[0],p[1]*s[1]]);
+    }
+  });
+  N=origins.length; targets=new Array(N);
+  initParticles();
+}
+function pulseFn(kx,ky){
+  for(var j=0;j<N;j++) targets[j]=[kx*origins[j][0]+W/2, ky*origins[j][1]+H/2];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PARTICLES
+// ─────────────────────────────────────────────────────────────────────────────
+var particles=[], traceLen=isMob?20:50, rand=Math.random;
+function initParticles(){
+  particles=[];
+  for(var i=0;i<N;i++){
+    var x=rand()*W,y=rand()*H,tr=[];
+    for(var k=0;k<traceLen;k++) tr[k]={x:x,y:y};
+    particles.push({
+      vx:0,vy:0,speed:rand()+5,
+      q:~~(rand()*N), D:2*(i%2)-1,
+      force:0.2*rand()+0.7,
+      col:'hsla(0,'+~~(40*rand()+100)+'%,'+~~(60*rand()+20)+'%,.35)',
+      trace:tr
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDIO ANALYSER
+// ─────────────────────────────────────────────────────────────────────────────
+var audioCtx, analyser, dataArray, bufLen;
+var bass=0, mid=0, treble=0, volume=0;
+var audioReady = false;
+
+function initAudio() {
+  audioCtx  = new (window.AudioContext || window.webkitAudioContext)();
+  analyser  = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  bufLen    = analyser.frequencyBinCount;
+  dataArray = new Uint8Array(bufLen);
+
+  var audio = document.getElementById('audio');
+  var src   = audioCtx.createMediaElementSource(audio);
+  src.connect(analyser);
+  analyser.connect(audioCtx.destination);
+  audioReady = true;
+  audio.play();
+}
+
+function readAudio() {
+  if(!audioReady) return;
+  analyser.getByteFrequencyData(dataArray);
+  var b=0,m=0,tr=0;
+  // bass 0-4, mid 4-20, treble 20-60
+  for(var i=0;i<4;i++)  b  += dataArray[i];
+  for(var i=4;i<20;i++) m  += dataArray[i];
+  for(var i=20;i<60;i++)tr += dataArray[i];
+  bass   = b  / (4   * 255);
+  mid    = m  / (16  * 255);
+  treble = tr / (40  * 255);
+  volume = (bass*0.5 + mid*0.3 + treble*0.2);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POINTER  (CSS coords for cursor ring, canvas coords for repulsion)
+// ─────────────────────────────────────────────────────────────────────────────
+var ptr    = { x:-9999, y:-9999, on:false };   // canvas px
+var cursor = { x:-9999, y:-9999 };              // CSS px (for ring)
+
+function toPx(cx,cy){
+  var r=canvas.getBoundingClientRect();
+  return{x:(cx-r.left)/r.width*W, y:(cy-r.top)/r.height*H};
+}
+
+window.addEventListener('mousemove',function(e){
+  cursor.x=e.clientX; cursor.y=e.clientY;
+  var p=toPx(e.clientX,e.clientY);
+  ptr.x=p.x; ptr.y=p.y; ptr.on=true;
+});
+window.addEventListener('mouseleave',function(){
+  ptr.on=false; cursor.x=-9999; cursor.y=-9999;
+});
+function onT(e){
+  var t=e.touches[0];
+  cursor.x=t.clientX; cursor.y=t.clientY;
+  var p=toPx(t.clientX,t.clientY);
+  ptr.x=p.x; ptr.y=p.y; ptr.on=true;
+}
+window.addEventListener('touchstart',  onT,                           {passive:true});
+window.addEventListener('touchmove',   onT,                           {passive:true});
+window.addEventListener('touchend',    function(){ptr.on=false;},     {passive:true});
+window.addEventListener('touchcancel', function(){ptr.on=false;},     {passive:true});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPOGRAPHY
+// ─────────────────────────────────────────────────────────────────────────────
+var PINK_DIM  = 'rgba(180,100,130,1)';
+var PINK_GLOW = 'rgba(210,130,160,1)';
+var WHITE     = '#ffffff';
+
+function fsSm()  { return Math.round(W*(isMob?.038:.020)); }
+function fsLuz() { return Math.round(W*(isMob?.26:.18));   }
+
+// — FELIZ 43 CUMPLEAÑOS —
+var TOP_STR='FELIZ 43 CUMPLEAÑOS', topChars=TOP_STR.split('');
+var topAlpha=topChars.map(function(){return 0;}), topIdx=0, topTimer=0;
+
+// — Luz —
+var LUZ_Y=0, LUZ_ALPHA=0, LUZ_SCALE=0.85, LINE_ALPHA=0;
+
+// — TE AMAMOS —
+var BOT_STR='TE AMAMOS', botChars=BOT_STR.split('');
+var botState=botChars.map(function(){return{y:0,alpha:0,active:false};});
+var botIdx=0, botTimer=0, botPhase='wait';
+
+// phases (ms after music starts)
+var P2=1500, P3=3200, P4=5200, P4done=false;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DRAW TOP LINE  — letters appear + heartbeat + audio bass pulse
+// ─────────────────────────────────────────────────────────────────────────────
+function drawTop(elapsed,dt){
+  var fs=fsSm();
+  ctx.font='200 '+fs+'px "Raleway","Helvetica Neue",Arial,sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+
+  var SP=fs*0.38, totalW=0;
+  var widths=topChars.map(function(ch){
+    var w=ctx.measureText(ch).width+(ch===' '?fs*0.2:SP);
+    totalW+=w; return w;
+  }); totalW-=SP;
+
+  // beat = heart pulse + bass hit
+  var beat = 1 + 0.045*Math.max(0,Math.sin(elapsed*0.0028)) + bass*0.12;
+
+  topTimer+=dt;
+  while(topTimer>80&&topIdx<topChars.length){ topIdx++; topTimer-=80; }
+
+  var topY=H*0.22, curX=W/2-totalW/2;
+  topChars.forEach(function(ch,i){
+    if(i<topIdx) topAlpha[i]=Math.min(1,topAlpha[i]+0.06);
+    var a=topAlpha[i]; if(a<=0){curX+=widths[i];return;}
+    var cw=ctx.measureText(ch).width, cx=curX+cw/2;
+    ctx.save();
+    ctx.translate(cx,topY); ctx.scale(beat,beat);
+    ctx.globalAlpha=a*0.4; ctx.fillStyle=PINK_GLOW;
+    ctx.shadowColor=PINK_GLOW; ctx.shadowBlur=14;
+    ctx.fillText(ch,0,0);
+    ctx.globalAlpha=a; ctx.fillStyle=PINK_DIM; ctx.shadowBlur=0;
+    ctx.fillText(ch,0,0);
+    ctx.restore();
+    curX+=widths[i];
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DRAW LUZ — rises, then breathes with mid frequencies
+// ─────────────────────────────────────────────────────────────────────────────
+function drawLuz(elapsed,dt){
+  var fs=fsLuz();
+  ctx.font='italic 300 '+fs+'px "Cormorant Garamond",Georgia,serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+
+  LUZ_Y    +=(0-LUZ_Y)*0.045;
+  LUZ_ALPHA+=(1-LUZ_ALPHA)*0.03;
+  LUZ_SCALE+=(1-LUZ_SCALE)*0.035;
+  LINE_ALPHA+=(1-LINE_ALPHA)*0.025;
+
+  // audio breathe: mid freq expands Luz slightly
+  var audioBreathe = 1 + mid*0.08 + bass*0.04;
+  var scale = LUZ_SCALE * audioBreathe;
+
+  var cy=H*0.50+LUZ_Y;
+  var textW=ctx.measureText('Luz').width;
+  var lineW=textW*0.38, gap=textW*0.58;
+
+  // decorative lines
+  ctx.save();
+  ctx.globalAlpha=LINE_ALPHA*0.55;
+  ctx.strokeStyle=PINK_DIM; ctx.lineWidth=isMob?.5:.7;
+  ctx.beginPath(); ctx.moveTo(W/2-gap-lineW,cy); ctx.lineTo(W/2-gap,cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(W/2+gap,cy);       ctx.lineTo(W/2+gap+lineW,cy); ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(W/2,cy); ctx.scale(scale,scale);
+  ctx.globalAlpha=LUZ_ALPHA*0.2;
+  ctx.fillStyle='#c46080'; ctx.shadowColor='#c46080'; ctx.shadowBlur=60+mid*40;
+  ctx.fillText('Luz',0,0);
+  ctx.globalAlpha=LUZ_ALPHA*0.5;
+  ctx.fillStyle='#e090b0'; ctx.shadowBlur=20+mid*20;
+  ctx.fillText('Luz',0,0);
+  ctx.globalAlpha=LUZ_ALPHA;
+  ctx.fillStyle=WHITE; ctx.shadowBlur=4;
+  ctx.fillText('Luz',0,0);
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DRAW TE AMAMOS — cascade + treble shimmer
+// ─────────────────────────────────────────────────────────────────────────────
+function drawBot(elapsed,dt){
+  var fs=fsSm();
+  ctx.font='200 '+fs+'px "Raleway","Helvetica Neue",Arial,sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+
+  var SP=fs*0.38, totalW=0;
+  var widths=botChars.map(function(ch){
+    var w=ctx.measureText(ch).width+(ch===' '?fs*0.2:SP);
+    totalW+=w; return w;
+  }); totalW-=SP;
+
+  var botY=H*0.78, drop=H*0.09;
+
+  if(botPhase==='falling'){
+    botTimer+=dt;
+    while(botTimer>110&&botIdx<botChars.length){
+      var st=botState[botIdx];
+      st.active=true; st.y=botY-drop; st.alpha=0;
+      botIdx++; botTimer-=110;
+    }
+    if(botIdx>=botChars.length) botPhase='done';
+  }
+
+  var curX=W/2-totalW/2;
+  botChars.forEach(function(ch,i){
+    var st=botState[i], cw=ctx.measureText(ch).width, cx=curX+cw/2;
+    if(st.active){
+      st.y    +=(botY-st.y)*0.07;
+      st.alpha+=(1-st.alpha)*0.06;
+      // treble shimmer: each char pulses offset
+      var shimmer = botPhase==='done' ? treble*0.06*Math.sin(elapsed*0.003+i*0.7) : 0;
+      var floatY  = botPhase==='done' ? Math.sin(elapsed*0.0009+i*0.6)*(isMob?1.5:2.5) : 0;
+
+      ctx.save();
+      ctx.globalAlpha=st.alpha*(0.35+shimmer);
+      ctx.fillStyle=PINK_GLOW; ctx.shadowColor=PINK_GLOW; ctx.shadowBlur=12+treble*20;
+      ctx.fillText(ch,cx,st.y+floatY);
+      ctx.globalAlpha=st.alpha*(0.9+shimmer);
+      ctx.fillStyle=PINK_DIM; ctx.shadowBlur=0;
+      ctx.fillText(ch,cx,st.y+floatY);
+      ctx.restore();
+    }
+    curX+=widths[i];
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DRAW CURSOR RING
+// ─────────────────────────────────────────────────────────────────────────────
+var ringAlpha  = 0;   // fades in/out with hover
+var ringRadius = 0;   // animates to target
+var RING_BASE  = 22;
+
+function drawCursor(elapsed){
+  // target alpha
+  var targetA = ptr.on ? 1 : 0;
+  ringAlpha  += (targetA - ringAlpha) * 0.12;
+  if(ringAlpha < 0.01) return;
+
+  // ring pulses slightly with bass
+  var targetR = (RING_BASE + bass*18) * koef;
+  ringRadius += (targetR - ringRadius) * 0.18;
+
+  // cursor position in canvas coords
+  var r   = canvas.getBoundingClientRect();
+  var ccx = (cursor.x - r.left) / r.width  * W;
+  var ccy = (cursor.y - r.top)  / r.height * H;
+
+  ctx.save();
+  ctx.globalAlpha   = ringAlpha;
+  ctx.strokeStyle   = '#9B59B6';      // purple
+  ctx.lineWidth     = 1.5 * koef;
+  ctx.shadowColor   = '#9B59B6';
+  ctx.shadowBlur    = 12 + bass*20;
+  ctx.beginPath();
+  ctx.arc(ccx, ccy, ringRadius, 0, Math.PI*2);
+  ctx.stroke();
+
+  // inner dot
+  ctx.globalAlpha = ringAlpha * 0.6;
+  ctx.fillStyle   = '#CE8EE8';
+  ctx.shadowBlur  = 6;
+  ctx.beginPath();
+  ctx.arc(ccx, ccy, 2*koef, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN LOOP
+// ─────────────────────────────────────────────────────────────────────────────
+var heartTime=0, cfg={traceK:.4,timeDelta:.01};
+var startTime=null, lastNow=0;
+
+function loop(now){
+  if(!startTime) startTime=now;
+  var elapsed=now-startTime;
+  var dt=Math.min(now-lastNow,80); lastNow=now;
+
+  readAudio();
+
+  // phase triggers
+  if(elapsed>P4&&botPhase==='wait') botPhase='falling';
+  if(elapsed>P3&&LUZ_ALPHA===0&&LUZ_Y===0) LUZ_Y=H*0.12;
+
+  var repR=W*0.14;
+  var n=-Math.cos(heartTime);
+  // audio: bass expands the heart pulse range
+  var kAudio = audioReady ? 1 + bass*0.25 : 1;
+  pulseFn((1+n)*0.5*kAudio, (1+n)*0.5*kAudio);
+  heartTime+=(Math.sin(heartTime)<0?9:n>0.8?.2:1)*cfg.timeDelta;
+
+  ctx.fillStyle='rgba(0,0,0,.1)';
+  ctx.fillRect(0,0,W,H);
+
+  // PARTICLES
+  for(var i=particles.length;i--;){
+    var p=particles[i], tg=targets[p.q];
+    var dx=p.trace[0].x-tg[0], dy=p.trace[0].y-tg[1];
+    var dl=Math.sqrt(dx*dx+dy*dy)||1;
+    if(dl<10){
+      if(rand()>.95){p.q=~~(rand()*N);}
+      else{if(rand()>.99)p.D*=-1; p.q=((p.q+p.D)%N+N)%N;}
+    }
+    // audio: speed boost on bass hits
+    var spd = p.speed * (1+bass*1.5);
+    p.vx+=(-dx/dl)*spd; p.vy+=(-dy/dl)*spd;
+
+    if(ptr.on){
+      var pdx=p.trace[0].x-ptr.x, pdy=p.trace[0].y-ptr.y;
+      var pdl=Math.sqrt(pdx*pdx+pdy*pdy)||1;
+      if(pdl<repR){var s=(repR-pdl)/repR;p.vx+=(pdx/pdl)*s*12;p.vy+=(pdy/pdl)*s*12;}
+    }
+    p.vx*=p.force; p.vy*=p.force;
+    p.trace[0].x+=p.vx; p.trace[0].y+=p.vy;
+    for(var k=0;k<p.trace.length-1;){
+      var T=p.trace[k],Nx=p.trace[++k];
+      Nx.x-=cfg.traceK*(Nx.x-T.x); Nx.y-=cfg.traceK*(Nx.y-T.y);
+    }
+    ctx.fillStyle=p.col;
+    for(var k=0;k<p.trace.length;k++) ctx.fillRect(p.trace[k].x,p.trace[k].y,1,1);
+  }
+
+  // TEXT
+  if(elapsed>P2) drawTop(elapsed,dt);
+  if(elapsed>P3) drawLuz(elapsed,dt);
+  drawBot(elapsed,dt);
+
+  // CURSOR RING (always on top)
+  drawCursor(elapsed);
+
+  requestAnimationFrame(loop);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// START BUTTON
+// ─────────────────────────────────────────────────────────────────────────────
+document.getElementById('startBtn').addEventListener('click', function(){
+  var el = document.getElementById('start');
+  el.classList.add('hide');
+  setTimeout(function(){ el.style.display='none'; }, 1500);
+  initAudio();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────────────────────────────────────────────
+window.addEventListener('resize', function(){ resize(); });
+document.fonts.ready.then(function(){
+  resize();
+  requestAnimationFrame(loop);
+});
+</script>
+
+<!-- audio element (hidden) -->
+<audio id="audio" src="music.mp3" loop crossorigin="anonymous" preload="auto"></audio>
+
+</body>
+</html>
